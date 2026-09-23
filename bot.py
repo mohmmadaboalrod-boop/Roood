@@ -17,7 +17,7 @@ from telegram.ext import (
     filters,
 )
 
-# مكتبات إنشاء PDF ودعم العربية
+# مكتبات إنشاء PDF ودعم اللغة العربية
 from reportlab.lib.pagesizes import letter
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -58,7 +58,7 @@ def save_record(user_id, action_type, full_name, action_time):
 FONT_PATH = "Amiri-Regular.ttf"
 
 def setup_arabic_font():
-    """تحميل تسجيل الخط العربي لمنع ظهور المربعات والرموز"""
+    """تحميل تسجيل الخط العربي لتفادي ظهور الرموز والمربعات"""
     if not os.path.exists(FONT_PATH):
         try:
             url = "https://github.com/google/fonts/raw/main/ofl/amiri/Amiri-Regular.ttf"
@@ -72,7 +72,7 @@ def setup_arabic_font():
     return "Helvetica"
 
 def reshape_text(text):
-    """إعادة تشكيل النص العربي للظهور بشكل صحيح من اليمين لليار"""
+    """تنسيق النص العربي ليظهر بالاتجاه الصحيح من اليمين لليسار"""
     reshaped = arabic_reshaper.reshape(text)
     return get_display(reshaped)
 
@@ -88,7 +88,7 @@ def build_pdf_report(records, title_text, filename="report.pdf"):
         parent=styles['Heading1'],
         fontName=font_name,
         fontSize=16,
-        alignment=1, # محاذاة للوسط
+        alignment=1, # محاذاة في الوسط
         spaceAfter=15
     )
 
@@ -126,21 +126,21 @@ def build_pdf_report(records, title_text, filename="report.pdf"):
     doc.build(elements)
     return filename
 
-# ==================== التحكم بالأوامر والشاشات ====================
+# ==================== الأوامر والشاشات ====================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
 
-    # شاشة المدير (أزرار المشرفين فقط)
+    # 1. شاشة المدير (3 أزرار فقط)
     if user_id in ADMIN_IDS:
         keyboard = [
-            ["📄 استخراج pdf", "🔄 الخروج المتعدد"],
+            ["📄 استخراج pdf", "🔄 الخروج المتكرر"],
             ["📢 تعميم"]
         ]
         reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
-        await update.message.reply_text("أهلاً بك يا مدير! اختر الإجراء المطلوب من القائمة:", reply_markup=reply_markup)
+        await update.message.reply_text("أهلاً بك يا مدير! اختر الإجراء المطلوب:", reply_markup=reply_markup)
         return ConversationHandler.END
 
-    # شاشة المستخدمين (أزرار دخول وخروج فقط)
+    # 2. شاشة المستخدمين (زرين فقط: دخول / خروج)
     elif user_id in ALLOWED_USERS:
         keyboard = [["دخول", "خروج"]]
         reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
@@ -159,7 +159,7 @@ async def handle_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user_id in ADMIN_IDS:
         if text == "📄 استخراج pdf":
             if not RECORDS:
-                await update.message.reply_text("لا توجد سجلات حالية لإستخراج التقرير.")
+                await update.message.reply_text("لا توجد سجلات حالية لاستخراج التقرير.")
                 return ConversationHandler.END
             
             pdf_file = build_pdf_report(RECORDS, "تقرير حركة الدخول والخروج العامة", "all_records.pdf")
@@ -167,8 +167,8 @@ async def handle_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await context.bot.send_document(chat_id=user_id, document=f, caption="📄 تقرير السجلات الشامل.")
             return ConversationHandler.END
 
-        elif text == "🔄 الخروج المتعدد":
-            # تصفية الأشخاص الذين تكرر تسجيلهم أكثر من مرة
+        elif text in ["🔄 الخروج المتكرر", "🔄 الخروج المتعدد"]:
+            # تصفية الأشخاص الذين قاموا بالدخول/الخروج أكثر من مرة
             counts = Counter(r["full_name"] for r in RECORDS)
             multi_names = {name for name, cnt in counts.items() if cnt > 1}
             multi_records = [r for r in RECORDS if r["full_name"] in multi_names]
@@ -215,10 +215,10 @@ async def get_time(update: Update, context: ContextTypes.DEFAULT_TYPE):
     full_name = context.user_data["full_name"]
     action_type = context.user_data["action_type"]
 
-    # حفظ السجل
+    # حفظ السجل في الذاكرة
     save_record(user_id, action_type, full_name, action_time)
 
-    # تأكيد للمستخدم
+    # رسالة تأكيد للمستخدم
     await update.message.reply_text(
         f"✅ تم تسجيل العملية بنجاح!\n\n"
         f"👤 الاسم: {full_name}\n"
@@ -226,9 +226,9 @@ async def get_time(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"⏰ الوقت: {action_time}"
     )
 
-    # إرسال إشعار فورى لجميع المدراء
+    # إرسال إشعار فوري لجميع المدراء
     admin_notice = (
-        f"🔔 **إشعار جديد:**\n\n"
+        f"🔔 **إشعار تسجيل جديد:**\n\n"
         f"👤 **الاسم الثلاثي:** {full_name}\n"
         f"📌 **الإجراء:** {action_type}\n"
         f"⏰ **الوقت:** {action_time}\n"
@@ -267,7 +267,7 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("تم إلغاء العملية.", reply_markup=ReplyKeyboardRemove())
     return ConversationHandler.END
 
-# ==================== خادم التشغيل الدائم 24/7 ====================
+# ==================== خادم التشغيل 24/7 ====================
 app = Flask(__name__)
 
 @app.route('/')
@@ -287,7 +287,7 @@ def run_flask():
     port = int(os.environ.get("PORT", 8080))
     app.run(host="0.0.0.0", port=port)
 
-# ==================== التشغيل ====================
+# ==================== التشغيل الرئيسي ====================
 def main():
     threading.Thread(target=run_flask, daemon=True).start()
     threading.Thread(target=keep_alive_ping, daemon=True).start()
@@ -296,7 +296,7 @@ def main():
 
     conv_handler = ConversationHandler(
         entry_points=[
-            MessageHandler(filters.Regex("^(دخول|خروج|📄 استخراج pdf|🔄 الخروج المتعدد|📢 تعميم)$"), handle_choice)
+            MessageHandler(filters.Regex("^(دخول|خروج|📄 استخراج pdf|🔄 الخروج المتكرر|🔄 الخروج المتعدد|📢 تعميم)$"), handle_choice)
         ],
         states={
             NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_name)],
