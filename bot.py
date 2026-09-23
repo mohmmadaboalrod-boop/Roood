@@ -158,16 +158,15 @@ async def handle_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # معالجة أزرار المدير
     if user_id in ADMIN_IDS:
         if text == "📄 استخراج pdf":
-            if not RECORDS:
-                await update.message.reply_text("لا توجد سجلات حالية لاستخراج التقرير.")
-                return ConversationHandler.END
-            
-            # استخراج السنوات المتاحة في السجلات
-            years = sorted(list(set(r["created_at"][:4] for r in RECORDS)), reverse=True)
-            if not years:
-                years = [str(datetime.now().year)]
+            current_year = datetime.now().year
+            # تجميع السنوات المتاحة في الذاكرة + السنة الحالية والسابقة
+            available_years = {str(current_year), str(current_year - 1)}
+            for r in RECORDS:
+                if len(r.get("created_at", "")) >= 4:
+                    available_years.add(r["created_at"][:4])
 
-            years_keyboard = [[y] for y in years]
+            years_list = sorted(list(available_years), reverse=True)
+            years_keyboard = [[y] for y in years_list]
             years_keyboard.append(["إلغاء"])
             
             reply_markup = ReplyKeyboardMarkup(years_keyboard, resize_keyboard=True)
@@ -267,7 +266,7 @@ async def select_day(update: Update, context: ContextTypes.DEFAULT_TYPE):
     month = context.user_data.get("pdf_month")
     target_date = f"{year}-{month}-{day_num}"
 
-    # تصفية السجلات حسب التاريخ المحدد حصراً
+    # تصفية السجلات حسب التاريخ المحدد
     filtered_records = [r for r in RECORDS if r["created_at"].startswith(target_date)]
 
     if not filtered_records:
