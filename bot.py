@@ -40,7 +40,7 @@ ALLOWED_USERS = parse_ids("ALLOWED_USERS")
 ADMIN_IDS = parse_ids("ADMIN_IDS")
 
 # حالات المحادثة
-NAME, TIME, BROADCAST_MSG = range(3)
+NAME, TIME, BROADCAST_MSG, SELECT_YEAR, SELECT_MONTH, SELECT_DAY = range(6)
 
 # ==================== حفظ البيانات في الذاكرة ====================
 RECORDS = []
@@ -58,7 +58,7 @@ def save_record(user_id, action_type, full_name, action_time):
 FONT_PATH = "Amiri-Regular.ttf"
 
 def setup_arabic_font():
-    """تحميل تسجيل الخط العربي لتفادي ظهور الرموز والمربعات"""
+    """تحميل وتسجيل الخط العربي لتفادي ظهور الرموز والمربعات"""
     if not os.path.exists(FONT_PATH):
         try:
             url = "https://github.com/google/fonts/raw/main/ofl/amiri/Amiri-Regular.ttf"
@@ -87,7 +87,7 @@ def build_pdf_report(records, title_text, filename="report.pdf"):
         'ArabicTitle',
         parent=styles['Heading1'],
         fontName=font_name,
-        fontSize=16,
+        fontSize=15,
         alignment=1, # محاذاة في الوسط
         spaceAfter=15
     )
@@ -162,13 +162,19 @@ async def handle_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_text("لا توجد سجلات حالية لاستخراج التقرير.")
                 return ConversationHandler.END
             
-            pdf_file = build_pdf_report(RECORDS, "تقرير حركة الدخول والخروج العامة", "all_records.pdf")
-            with open(pdf_file, "rb") as f:
-                await context.bot.send_document(chat_id=user_id, document=f, caption="📄 تقرير السجلات الشامل.")
-            return ConversationHandler.END
+            # استخراج السنوات المتاحة في السجلات
+            years = sorted(list(set(r["created_at"][:4] for r in RECORDS)), reverse=True)
+            if not years:
+                years = [str(datetime.now().year)]
+
+            years_keyboard = [[y] for y in years]
+            years_keyboard.append(["إلغاء"])
+            
+            reply_markup = ReplyKeyboardMarkup(years_keyboard, resize_keyboard=True)
+            await update.message.reply_text("📅 **الخطوة 1:** اختر **السنة** المطلوبة:", reply_markup=reply_markup, parse_mode="Markdown")
+            return SELECT_YEAR
 
         elif text in ["🔄 الخروج المتكرر", "🔄 الخروج المتعدد"]:
-            # تصفية الأشخاص الذين قاموا بالدخول/الخروج أكثر من مرة
             counts = Counter(r["full_name"] for r in RECORDS)
             multi_names = {name for name, cnt in counts.items() if cnt > 1}
             multi_records = [r for r in RECORDS if r["full_name"] in multi_names]
@@ -199,6 +205,88 @@ async def handle_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("يرجى اختيار أحد الأزرار المتاحة.")
     return ConversationHandler.END
 
+# ==================== مراحل تصفية التاريخ للـ PDF ====================
+async def select_year(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text
+    if text == "إلغاء":
+        await start(update, context)
+        return ConversationHandler.END
+
+    context.user_data["pdf_year"] = text.strip()
+
+    # عرض أزرار الـ 12 شهراً
+    months_keyboard = [
+        ["1", "2", "3"],
+        ["4", "5", "6"],
+        ["7", "8", "9"],
+        ["10", "11", "12"],
+        ["إلغاء"]
+    ]
+    reply_markup = ReplyKeyboardMarkup(months_keyboard, resize_keyboard=True)
+    await update.message.reply_text(f"🗓 السنة المختارة: **{text}**\n\n🗓 **الخطوة 2:** اختر **الشهر** (1-12):", reply_markup=reply_markup, parse_mode="Markdown")
+    return SELECT_MONTH
+
+async def select_month(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text
+    if text == "إلغاء":
+        await start(update, context)
+        return ConversationHandler.END
+
+    if not text.isdigit() or not (1 <= int(text) <= 12):
+        await update.message.reply_text("يرجى اختيار شهر صالح من القائمة.")
+        return SELECT_MONTH
+
+    month_num = f"{int(text):02d}"
+    context.user_data["pdf_month"] = month_num
+
+    # عرض أزرار الأيام (1 إلى 31)
+    days_keyboard = [
+        ["1", "2", "3", "4", "5", "6", "7"],
+        ["8", "9", "10", "11", "12", "13", "14"],
+        ["15", "16", "17", "18", "19", "20", "21"],
+        ["22", "23", "24", "25", "26", "27", "28"],
+        ["29", "30", "31"],
+        ["إلغاء"]
+    ]
+    reply_markup = ReplyKeyboardMarkup(days_keyboard, resize_keyboard=True)
+    await update.message.reply_text(f"📆 الشهر المختار: **{month_num}**\n\n📆 **الخطوة 3:** اختر **اليوم** (1-31):", reply_markup=reply_markup, parse_mode="Markdown")
+    return SELECT_DAY
+
+async def select_day(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text
+    if text == "إلغاء":
+        await start(update, context)
+        return ConversationHandler.END
+
+    if not text.isdigit() or not (1 <= int(text) <= 31):
+        await update.message.reply_text("يرجى اختيار يوم صالح من القائمة.")
+        return SELECT_DAY
+
+    day_num = f"{int(text):02d}"
+    year = context.user_data.get("pdf_year")
+    month = context.user_data.get("pdf_month")
+    target_date = f"{year}-{month}-{day_num}"
+
+    # تصفية السجلات حسب التاريخ المحدد حصراً
+    filtered_records = [r for r in RECORDS if r["created_at"].startswith(target_date)]
+
+    if not filtered_records:
+        await update.message.reply_text(f"⚠️ لا توجد سجلات مسجلة بتاريخ **{target_date}**.", parse_mode="Markdown")
+        await start(update, context)
+        return ConversationHandler.END
+
+    pdf_file = build_pdf_report(filtered_records, f"تقرير حركة الدخول والخروج بتاريخ {target_date}", f"report_{target_date}.pdf")
+    with open(pdf_file, "rb") as f:
+        await context.bot.send_document(
+            chat_id=update.effective_user.id,
+            document=f,
+            caption=f"📄 تقرير السجلات الخاص بتاريخ: {target_date}"
+        )
+
+    await start(update, context)
+    return ConversationHandler.END
+
+# ==================== إدخال بيانات المستخدم والتعميم ====================
 async def get_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["full_name"] = update.message.text
     action = context.user_data["action_type"]
@@ -215,10 +303,8 @@ async def get_time(update: Update, context: ContextTypes.DEFAULT_TYPE):
     full_name = context.user_data["full_name"]
     action_type = context.user_data["action_type"]
 
-    # حفظ السجل في الذاكرة
     save_record(user_id, action_type, full_name, action_time)
 
-    # رسالة تأكيد للمستخدم
     await update.message.reply_text(
         f"✅ تم تسجيل العملية بنجاح!\n\n"
         f"👤 الاسم: {full_name}\n"
@@ -226,7 +312,7 @@ async def get_time(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"⏰ الوقت: {action_time}"
     )
 
-    # إرسال إشعار فوري لجميع المدراء
+    # إرسال إشعار فوري للمدراء
     admin_notice = (
         f"🔔 **إشعار تسجيل جديد:**\n\n"
         f"👤 **الاسم الثلاثي:** {full_name}\n"
@@ -302,6 +388,9 @@ def main():
             NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_name)],
             TIME: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_time)],
             BROADCAST_MSG: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_broadcast)],
+            SELECT_YEAR: [MessageHandler(filters.TEXT & ~filters.COMMAND, select_year)],
+            SELECT_MONTH: [MessageHandler(filters.TEXT & ~filters.COMMAND, select_month)],
+            SELECT_DAY: [MessageHandler(filters.TEXT & ~filters.COMMAND, select_day)],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
     )
