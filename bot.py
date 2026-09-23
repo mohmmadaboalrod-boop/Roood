@@ -157,20 +157,23 @@ async def handle_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # معالجة أزرار المدير
     if user_id in ADMIN_IDS:
-        if text == "📄 استخراج pdf":
+        if text in ["📄 استخراج pdf", "📄 استخراج PDF"]:
             current_year = datetime.now().year
-            # تجميع السنوات المتاحة في الذاكرة + السنة الحالية والسابقة
-            available_years = {str(current_year), str(current_year - 1)}
+            years_set = {str(current_year), str(current_year - 1)}
             for r in RECORDS:
-                if len(r.get("created_at", "")) >= 4:
-                    available_years.add(r["created_at"][:4])
-
-            years_list = sorted(list(available_years), reverse=True)
-            years_keyboard = [[y] for y in years_list]
-            years_keyboard.append(["إلغاء"])
+                if "created_at" in r:
+                    years_set.add(r["created_at"][:4])
             
+            years = sorted(list(years_set), reverse=True)
+            years_keyboard = [[y] for y in years]
+            years_keyboard.append(["إلغاء"])
+
             reply_markup = ReplyKeyboardMarkup(years_keyboard, resize_keyboard=True)
-            await update.message.reply_text("📅 **الخطوة 1:** اختر **السنة** المطلوبة:", reply_markup=reply_markup, parse_mode="Markdown")
+            await update.message.reply_text(
+                "📅 **الخطوة 1:** اختر **السنة** المطلوبة:", 
+                reply_markup=reply_markup, 
+                parse_mode="Markdown"
+            )
             return SELECT_YEAR
 
         elif text in ["🔄 الخروج المتكرر", "🔄 الخروج المتعدد"]:
@@ -211,9 +214,12 @@ async def select_year(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await start(update, context)
         return ConversationHandler.END
 
+    if not text.isdigit():
+        await update.message.reply_text("يرجى اختيار سنة صالحة من الأزرار المتاحة.")
+        return SELECT_YEAR
+
     context.user_data["pdf_year"] = text.strip()
 
-    # عرض أزرار الـ 12 شهراً
     months_keyboard = [
         ["1", "2", "3"],
         ["4", "5", "6"],
@@ -222,7 +228,11 @@ async def select_year(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ["إلغاء"]
     ]
     reply_markup = ReplyKeyboardMarkup(months_keyboard, resize_keyboard=True)
-    await update.message.reply_text(f"🗓 السنة المختارة: **{text}**\n\n🗓 **الخطوة 2:** اختر **الشهر** (1-12):", reply_markup=reply_markup, parse_mode="Markdown")
+    await update.message.reply_text(
+        f"🗓 السنة المختارة: **{text}**\n\n🗓 **الخطوة 2:** اختر **الشهر** (1-12):", 
+        reply_markup=reply_markup, 
+        parse_mode="Markdown"
+    )
     return SELECT_MONTH
 
 async def select_month(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -238,7 +248,6 @@ async def select_month(update: Update, context: ContextTypes.DEFAULT_TYPE):
     month_num = f"{int(text):02d}"
     context.user_data["pdf_month"] = month_num
 
-    # عرض أزرار الأيام (1 إلى 31)
     days_keyboard = [
         ["1", "2", "3", "4", "5", "6", "7"],
         ["8", "9", "10", "11", "12", "13", "14"],
@@ -248,7 +257,11 @@ async def select_month(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ["إلغاء"]
     ]
     reply_markup = ReplyKeyboardMarkup(days_keyboard, resize_keyboard=True)
-    await update.message.reply_text(f"📆 الشهر المختار: **{month_num}**\n\n📆 **الخطوة 3:** اختر **اليوم** (1-31):", reply_markup=reply_markup, parse_mode="Markdown")
+    await update.message.reply_text(
+        f"📆 الشهر المختار: **{month_num}**\n\n📆 **الخطوة 3:** اختر **اليوم** (1-31):", 
+        reply_markup=reply_markup, 
+        parse_mode="Markdown"
+    )
     return SELECT_DAY
 
 async def select_day(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -266,8 +279,7 @@ async def select_day(update: Update, context: ContextTypes.DEFAULT_TYPE):
     month = context.user_data.get("pdf_month")
     target_date = f"{year}-{month}-{day_num}"
 
-    # تصفية السجلات حسب التاريخ المحدد
-    filtered_records = [r for r in RECORDS if r["created_at"].startswith(target_date)]
+    filtered_records = [r for r in RECORDS if r.get("created_at", "").startswith(target_date)]
 
     if not filtered_records:
         await update.message.reply_text(f"⚠️ لا توجد سجلات مسجلة بتاريخ **{target_date}**.", parse_mode="Markdown")
@@ -311,7 +323,6 @@ async def get_time(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"⏰ الوقت: {action_time}"
     )
 
-    # إرسال إشعار فوري للمدراء
     admin_notice = (
         f"🔔 **إشعار تسجيل جديد:**\n\n"
         f"👤 **الاسم الثلاثي:** {full_name}\n"
@@ -352,21 +363,30 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("تم إلغاء العملية.", reply_markup=ReplyKeyboardRemove())
     return ConversationHandler.END
 
-# ==================== خادم التشغيل 24/7 ====================
+# ==================== خادم التشغيل الدائم 24/7 ====================
 app = Flask(__name__)
 
 @app.route('/')
+@app.route('/ping')
 def home():
-    return "Bot is running 24/7!"
+    return "OK - Bot is running 24/7", 200
 
 def keep_alive_ping():
+    """إرسال طلب تلقائي كل 4 دقائق لمنع السيرفر من الدخول في وضع السكون"""
+    time.sleep(15)  # الانتظار لحين تشغيل Flask
     while True:
-        time.sleep(600)
         if RENDER_URL:
             try:
-                urllib.request.urlopen(RENDER_URL)
+                url = RENDER_URL.rstrip('/') + '/ping'
+                req = urllib.request.Request(
+                    url, 
+                    headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+                )
+                with urllib.request.urlopen(req, timeout=10) as response:
+                    print(f"Keep-alive ping successful: {response.status}")
             except Exception as e:
-                print(f"Ping failed: {e}")
+                print(f"Keep-alive ping failed: {e}")
+        time.sleep(240)  # كل 4 دقائق
 
 def run_flask():
     port = int(os.environ.get("PORT", 8080))
@@ -381,7 +401,7 @@ def main():
 
     conv_handler = ConversationHandler(
         entry_points=[
-            MessageHandler(filters.Regex("^(دخول|خروج|📄 استخراج pdf|🔄 الخروج المتكرر|🔄 الخروج المتعدد|📢 تعميم)$"), handle_choice)
+            MessageHandler(filters.Regex("^(دخول|خروج|📄 استخراج pdf|📄 استخراج PDF|🔄 الخروج المتكرر|🔄 الخروج المتعدد|📢 تعميم)$"), handle_choice)
         ],
         states={
             NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_name)],
